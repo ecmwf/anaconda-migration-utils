@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+import os
+import sys
+import subprocess
+import re
+import argparse
+import yaml
+
+default_conda_exe = "/usr/local/apps/conda/23.11.0-0/bin/conda"
+conda_exe = os.getenv("CONDA_EXE", default_conda_exe)
+
+def get_conda_env_from_history(env_name=None):
+    """Get the list of conda packages from history (i.e., user-installed packages) for a specific environment."""
+    command = [conda_exe, 'env', 'export', '--from-history']
+    if env_name and "/" not in env_name:
+        command.extend(['-n', env_name])
+    if env_name and "/" in env_name:
+        command.extend(['-p', env_name])
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True)
+    return yaml.safe_load(result.stdout)
+
+def get_conda_versions(env_name=None):
+    """Get the list of conda packages with versions for a specific environment."""
+    command = [conda_exe, 'env', 'export' ,'--no-builds']
+    if env_name and "/" not in env_name:
+        command.extend(['-n', env_name])
+    if env_name and "/" in env_name:
+        command.extend(['-p', env_name])
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True)
+    return yaml.safe_load(result.stdout)
+
+class MyDumper(yaml.Dumper):
+    def increase_indent(self, flow=False, indentless=False):
+        return super(MyDumper, self).increase_indent(flow, False)
+
+def create_conda_yaml_with_versions(env_name=None):
+
+    conda_versions = get_conda_versions(env_name)
+    if not 'dependencies' in conda_versions:
+        print(f"ERROR: Empty or non-existent environment: {env_name}" ,file=sys.stderr)
+        sys.exit(1);
+
+    conda_env = get_conda_env_from_history(env_name)
+
+    package_versions = {}
+    for package in conda_versions.get('dependencies', []):
+        if isinstance(package,str):
+            parts = package.split('=')
+            if len(parts) >= 2:
+                name = parts[0]
+                version = parts[1]
+                package_versions[name] = version
+
+    dependencies = []
+    for package in conda_env.get('dependencies', []):
+        if isinstance(package, str):  # Only interested in conda packages without specific versions
+            package_name = re.split(r'[\[<>=!]', package)[0].strip()
+            if package_name in package_versions:
+                dependencies.append(f"{package_name}={package_versions[package_name]}")
+            else:
+                dependencies.append(package)  # Fallback to the original if not found
+
+    # Add pip dependencies
+    for p in conda_versions.get('dependencies',[]):
+        if isinstance(p, dict):
+            pip_entry = f'pip={package_versions["pip"]}'
+            if 'pip' not in [re.split(r'[\[<>=!]', e)[0].strip() for e in conda_env['dependencies']]:
+                dependencies.append(f'pip={package_versions["pip"]}')
+                
+            dependencies.append(p)
+
+    conda_env['dependencies'] = dependencies
+    conda_env['channels'] = [ c for c in conda_env['channels'] if c != "defaults" ]
+    if not conda_env['channels']:
+        conda_env['channels'].append("conda-forge")
+    del conda_env['prefix']
+
+    del conda_env['name']
+    print(yaml.dump(conda_env, Dumper=MyDumper, default_flow_style=False, explicit_start=True, indent=2))
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Export Conda environment from history with versions and pip packages.')
+    parser.add_argument(
+        'name', 
+        type=str, 
+        nargs='?',
+        help='Name or prefix of the conda environment. If not provided, uses the current active environment.'
+    )
+    
+    args = parser.parse_args()
+    if not args.name and "CONDA_DEFAULT_ENV" not in os.environ:
+        print("ERROR: No environment selected to export\n" ,file=sys.stderr)
+        parser.print_help(file=sys.stderr)
+        sys.exit(1);
+        
+    create_conda_yaml_with_versions(env_name=args.name)

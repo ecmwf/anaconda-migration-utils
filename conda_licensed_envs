@@ -1,0 +1,6 @@
+#!/bin/bash
+if [[ -e /home/${1:-$USER}/.conda/environments.txt ]]; then 
+    for e in $(cat /home/${1:-$USER}/.conda/environments.txt); do 
+        [[ -d $e ]] && grep -m 1 -q repo.anaconda.com/pkgs/ $e/conda-meta/* && echo "$e" || true;
+    done
+fi
