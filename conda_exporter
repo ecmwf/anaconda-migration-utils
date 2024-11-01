@@ -4,7 +4,12 @@ import sys
 import subprocess
 import re
 import argparse
-import yaml
+try:
+    import yaml
+except ImportError:
+    print(f"ERROR: Pyyaml not available. You may install it with:" ,file=sys.stderr)
+    print(f"    pip install pyyaml" ,file=sys.stderr)
+    sys.exit(1);
 
 default_conda_exe = "/usr/local/apps/conda/23.11.0-0/bin/conda"
 conda_exe = os.getenv("CONDA_EXE", default_conda_exe)
